@@ -1,0 +1,6 @@
+.env*
+.aws
+.serverless
+node_modules/
+package*.json
+.python-version

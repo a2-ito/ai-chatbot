@@ -1,0 +1,31 @@
+service: ai-chat
+frameworkVersion: '3'
+useDotenv: true
+provider:
+  name: aws
+  runtime: python3.10
+  environment:
+    SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
+    SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+  timeout: 30
+  iam:
+    role:
+      statements:
+        # Lazy Listeners を利用するために必要
+        - Effect: Allow
+          Action:
+            - lambda:InvokeFunction
+            - lambda:InvokeAsync
+          Resource: "*"
+functions:
+  slack:
+    handler: app.handler
+    events:
+      - http:
+          path: slack/events
+          method: post
+    reservedConcurrency: 1
+plugins:
+  - serverless-offline
+  - serverless-python-requirements
