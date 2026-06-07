@@ -1,0 +1,58 @@
+name: build
+
+# main への Pull Request で serverless package によるビルド検証を実行する
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: serverless package (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      # 片方が落ちてももう片方の結果を確認できるようにする
+      fail-fast: false
+      matrix:
+        include:
+          - name: openai
+            workdir: .
+            python: "3.10"
+            env: |
+              SLACK_SIGNING_SECRET=dummy
+              SLACK_BOT_TOKEN=dummy
+              OPENAI_API_KEY=dummy
+          - name: gemini
+            workdir: gemini
+            python: "3.11"
+            env: |
+              SLACK_SIGNING_SECRET=dummy
+              SLACK_BOT_TOKEN=dummy
+              GEMINI_API_KEY=dummy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # package*.json は .gitignore 対象のため、CI 内で必要なプラグインを直接インストールする
+      - name: Install Serverless Framework and plugins
+        working-directory: ${{ matrix.workdir }}
+        run: npm install serverless@3 serverless-offline serverless-python-requirements
+
+      # useDotenv: true のため ${env:...} 解決用にダミーの .env を生成する（実値は不要・パッケージング検証のみ）
+      - name: Create dummy .env
+        working-directory: ${{ matrix.workdir }}
+        run: echo "${{ matrix.env }}" > .env
+
+      - name: Build (serverless package)
+        working-directory: ${{ matrix.workdir }}
+        run: npx serverless package
