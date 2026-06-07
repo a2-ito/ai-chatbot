@@ -8,6 +8,8 @@ provider:
     SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
     OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    NOTION_SECRET: ${env:NOTION_SECRET}
+    LOG_LEVEL: ${env:LOG_LEVEL, 'INFO'}
   timeout: 30
   iam:
     role:
@@ -29,3 +31,4 @@ functions:
 plugins:
   - serverless-offline
   - serverless-python-requirements
+  - serverless-better-credentials
