@@ -44,9 +44,11 @@ jobs:
           python-version: ${{ matrix.python }}
 
       # package*.json は .gitignore 対象のため、CI 内で必要なプラグインを直接インストールする
+      # serverless v3 系のため、各プラグインも v3 対応バージョンに固定する
+      # （serverless-offline の最新版は serverless@^4 を要求し peer 依存が衝突するため）
       - name: Install Serverless Framework and plugins
         working-directory: ${{ matrix.workdir }}
-        run: npm install serverless@3 serverless-offline serverless-python-requirements
+        run: npm install --legacy-peer-deps serverless@3 serverless-offline@13 serverless-python-requirements@6
 
       # useDotenv: true のため ${env:...} 解決用にダミーの .env を生成する（実値は不要・パッケージング検証のみ）
       - name: Create dummy .env
