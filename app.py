@@ -1,8 +1,15 @@
+from __future__ import annotations
+
 import os
+import json
 import logging
+from functools import lru_cache
+from typing import Any
+
 from slack_bolt import App
-import openai
 import commonmarkslack
+# llama_cpp は重いネイティブlib。ack 経路のコールド初期化を軽くするため、
+# モジュール読み込み時ではなく get_llm() 内で遅延 import する。
 
 # ログ設定: LOG_LEVEL 環境変数で制御（DEBUG, INFO, WARNING, ERROR）
 log_level = (os.getenv("LOG_LEVEL") or "INFO").upper()
@@ -13,18 +20,69 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.debug("app.py 初期化開始")
 
+# --- LLM 設定（環境変数で上書き可） ---------------------------------------
+# MODEL_PATH はイメージに同梱した GGUF ファイルを指す。
+MODEL_PATH = os.environ.get("MODEL_PATH", "/opt/model/model.gguf")
+# コンテキスト長。Lambda のメモリ節約のため小さめに保つ。
+N_CTX = int(os.environ.get("N_CTX", "2048"))
+# CPU スレッド数。Lambda は 1769MB あたり約 1 vCPU。
+N_THREADS = int(os.environ.get("N_THREADS", str(os.cpu_count() or 2)))
+# 生成パラメータの既定値。
+DEFAULT_MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "256"))
+DEFAULT_TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.7"))
+
+SYSTEM_PROMPT = """あなたは Chief AI Officer です。
+あなたは社員のカウンターパートとして社員の親身になって相談に乗ってください。"""
+
+
+@lru_cache(maxsize=1)
+def get_llm() -> "Llama":
+    """モデルを一度だけロードし、コンテナの生存中はキャッシュして再利用する。"""
+    from llama_cpp import Llama  # 遅延import（ここで初めてネイティブlibを読み込む）
+
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError(
+            f"Model file not found at {MODEL_PATH}. "
+            "ビルド前に scripts/download_model.sh を実行したか確認してください。"
+        )
+    logger.info("LLM ロード開始 path=%s n_ctx=%d n_threads=%d", MODEL_PATH, N_CTX, N_THREADS)
+    llm = Llama(
+        model_path=MODEL_PATH,
+        n_ctx=N_CTX,
+        n_threads=N_THREADS,
+        verbose=False,
+    )
+    logger.info("LLM ロード完了")
+    return llm
+
+
+def chat(messages: list[dict[str, str]], max_tokens: int, temperature: float) -> str:
+    """messages 形式の会話履歴から応答テキストを生成する。"""
+    llm = get_llm()
+    result = llm.create_chat_completion(
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    return result["choices"][0]["message"]["content"].strip()
+
+
 app = App(
     signing_secret=os.environ["SLACK_SIGNING_SECRET"],
     token=os.environ["SLACK_BOT_TOKEN"],
     process_before_response=True,
+    # 起動時の自動 auth.test を無効化（ダミートークンでのローカル検証を可能にする）。
+    # bot user_id の取得と疎通確認は get_bot_user_id() で個別に行う。
+    token_verification_enabled=False,
 )
-
-openai.api_key = os.environ["OPENAI_API_KEY"]
 
 parser = commonmarkslack.Parser()
 renderer = commonmarkslack.SlackRenderer()
 
+@lru_cache(maxsize=1)
 def get_bot_user_id():
+    # auth.test は通信を伴うため、モジュール読み込み時ではなく初回利用時に遅延実行し、
+    # 結果をコンテナ生存中キャッシュする（ack 経路のコールド初期化を軽くするため）。
     try:
         logger.debug("auth_test 実行中")
         result = app.client.auth_test(
@@ -36,9 +94,6 @@ def get_bot_user_id():
     except Exception as e:
         logger.exception("auth_test 失敗（botUserId は None になります）: %s", e)
         return None
-
-botUserId = get_bot_user_id()
-logger.debug("botUserId: %s", botUserId)
 
 def respond_to_slack_within_3_seconds(body, ack):
     logger.debug("respond_to_slack_within_3_seconds 呼び出し body=%s", body)
@@ -64,7 +119,6 @@ def fetch_thread_messages(channel, thread_ts):
         logger.exception("conversations_replies 失敗 channel=%s thread_ts=%s: %s", channel, thread_ts, e)
         raise
 
-import time
 def run_long_process(body, say):
     logger.info("run_long_process 開始")
     try:
@@ -86,8 +140,7 @@ def run_long_process(body, say):
 
         threadContent.append({
             "role": "system",
-            "content": """あなたは Chief AI Officer です。
-        あなたは社員のカウンターパートとして社員の親身になって相談に乗ってください。""",
+            "content": SYSTEM_PROMPT,
         })
 
         threadContent.append({
@@ -96,7 +149,7 @@ def run_long_process(body, say):
         })
 
         for message in threadMessages:
-            if message["user"] == botUserId:
+            if message["user"] == get_bot_user_id():
                 threadContent.append({
                     "role": "assistant",
                     "content": message["text"],
@@ -107,21 +160,9 @@ def run_long_process(body, say):
                     "content": message["text"],
                 })
 
-        logger.debug("OpenAI API 呼び出し messages=%d 件", len(threadContent))
-        res = openai.ChatCompletion.create(
-            model="gpt-5-mini",
-            messages=threadContent,
-            # tools=[
-            #     {
-            #         "type": "mcp",
-            #         "server_label": "notion",
-            #         "server_url": "https://mcp.notion.com/sse",
-            #         "authorization": os.environ["NOTION_SECRET"],
-            #     },
-            # ]
-        )
-        resText = res.choices[0]["message"]["content"].strip()
-        logger.info("OpenAI 応答取得成功 長さ=%d", len(resText))
+        logger.debug("LLM 推論開始 messages=%d 件", len(threadContent))
+        resText = chat(threadContent, DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE)
+        logger.info("LLM 応答取得成功 長さ=%d", len(resText))
 
         slack_md = renderer.render(parser.parse(resText))
         say(text=slack_md, channel=channel, thread_ts=thread_ts)
@@ -135,18 +176,6 @@ app.event("app_mention")(
     lazy=[run_long_process]
 )
 
-#@app.event("app_mention")
-def mention_handler(body, say):
-    mention = body["event"]
-    text = mention["text"]
-    channel = mention["channel"]
-    thread_ts = mention["ts"]
-
-    print(f"メンションされました: {text}")
-
-    # スレッドでテキストをオウム返し
-    say(text=text, channel=channel, thread_ts=thread_ts)
-
 @app.event("message")
 def handle_message_events(body, logger):
     logger.info(body)
@@ -157,8 +186,50 @@ if __name__ == "__main__":
 # AWS Lambda
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 
+
+def _is_direct_llm_request(event: Any) -> bool:
+    """Slack(API Gateway)イベント以外に、直接 prompt/messages を渡す呼び出しを許可する。
+
+    ローカル RIE での動作確認（scripts/run_local.sh）や手動 invoke 用。
+    Slack 経由は body/headers/requestContext を持つため、それらが無く
+    prompt または messages を持つ場合のみ直接推論とみなす。
+    """
+    return (
+        isinstance(event, dict)
+        and "requestContext" not in event
+        and ("prompt" in event or "messages" in event)
+    )
+
+
+def _direct_llm_handler(event: dict[str, Any]) -> dict[str, Any]:
+    prompt = event.get("prompt")
+    messages = event.get("messages")
+    max_tokens = int(event.get("max_tokens", DEFAULT_MAX_TOKENS))
+    temperature = float(event.get("temperature", DEFAULT_TEMPERATURE))
+
+    if not messages:
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+
+    text = chat(messages, max_tokens, temperature)
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(
+            {"output": text, "model": os.path.basename(MODEL_PATH)},
+            ensure_ascii=False,
+        ),
+    }
+
+
 def handler(event, context):
     logger.debug("Lambda handler 呼び出し event_keys=%s", list(event.keys()) if isinstance(event, dict) else type(event))
+    # ローカル検証・手動 invoke 用の直接推論パス
+    if _is_direct_llm_request(event):
+        logger.debug("直接 LLM リクエストとして処理")
+        return _direct_llm_handler(event)
     try:
         slack_handler = SlackRequestHandler(app=app)
         result = slack_handler.handle(event, context)
