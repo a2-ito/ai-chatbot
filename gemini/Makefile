@@ -1,5 +1,5 @@
 APP									=	ai-chat
-AWS_PROFILE					= XXX
+AWS_PROFILE					= private.chatbot
 
 export
 AWS_SDK_LOAD_CONFIG := 1

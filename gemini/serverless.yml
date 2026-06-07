@@ -8,6 +8,7 @@ provider:
     SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
     GOOGLE_API_KEY: ${env:GEMINI_API_KEY}
+    LOG_LEVEL: ${env:LOG_LEVEL, 'INFO'}
   timeout: 30
   iam:
     role:
