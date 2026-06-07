@@ -22,6 +22,7 @@ jobs:
               SLACK_SIGNING_SECRET=dummy
               SLACK_BOT_TOKEN=dummy
               OPENAI_API_KEY=dummy
+              NOTION_SECRET=dummy
           - name: gemini
             workdir: gemini
             python: "3.11"
