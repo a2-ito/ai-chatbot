@@ -56,6 +56,13 @@ jobs:
         working-directory: ${{ matrix.workdir }}
         run: echo "${{ matrix.env }}" > .env
 
+      # serverless-better-credentials（openai 版のみ）が package 時に AWS 認証情報を解決するため、
+      # 認証情報が無いと EC2 メタデータへフォールバックして 400 で落ちる。
+      # パッケージング検証のみなので実値は不要・ダミー認証情報で解決させる。
       - name: Build (serverless package)
         working-directory: ${{ matrix.workdir }}
+        env:
+          AWS_ACCESS_KEY_ID: dummy
+          AWS_SECRET_ACCESS_KEY: dummy
+          AWS_REGION: us-east-1
         run: npx serverless package
