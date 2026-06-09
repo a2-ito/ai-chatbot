@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import logging
+import re
 from functools import lru_cache
 from typing import Any
 
@@ -56,6 +57,19 @@ def get_llm() -> "Llama":
     return llm
 
 
+# 推論モデル(Qwen3 等)が出力する思考ブロックを除去する。
+# 閉じた <think>...</think> を削除。max_tokens 切れで未クローズなら、
+# <think> 以降は思考のみ＝回答なしとみなして空にする。
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def strip_think(text: str) -> str:
+    text = _THINK_RE.sub("", text)
+    if "<think>" in text:  # 未クローズの思考（回答が出る前にトークン切れ）
+        text = text.split("<think>", 1)[0]
+    return text.strip()
+
+
 def chat(messages: list[dict[str, str]], max_tokens: int, temperature: float) -> str:
     """messages 形式の会話履歴から応答テキストを生成する。"""
     llm = get_llm()
@@ -64,7 +78,7 @@ def chat(messages: list[dict[str, str]], max_tokens: int, temperature: float) ->
         max_tokens=max_tokens,
         temperature=temperature,
     )
-    return result["choices"][0]["message"]["content"].strip()
+    return strip_think(result["choices"][0]["message"]["content"])
 
 
 app = App(
@@ -202,6 +216,8 @@ def _is_direct_llm_request(event: Any) -> bool:
 
 
 def _direct_llm_handler(event: dict[str, Any]) -> dict[str, Any]:
+    import time
+
     prompt = event.get("prompt")
     messages = event.get("messages")
     max_tokens = int(event.get("max_tokens", DEFAULT_MAX_TOKENS))
@@ -213,12 +229,41 @@ def _direct_llm_handler(event: dict[str, Any]) -> dict[str, Any]:
             {"role": "user", "content": prompt},
         ]
 
-    text = chat(messages, max_tokens, temperature)
+    # モデルロード時間（lru_cache 済みならほぼ 0。コールド初回のみ実ロード時間）。
+    t_load = time.time()
+    llm = get_llm()
+    model_load_sec = round(time.time() - t_load, 3)
+
+    # 生成時間のみを計測して tokens/sec を算出（ロード・ネットワークを除外）。
+    t_gen = time.time()
+    result = llm.create_chat_completion(
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    gen_sec = round(time.time() - t_gen, 3)
+
+    text = strip_think(result["choices"][0]["message"]["content"])
+    usage = result.get("usage", {}) or {}
+    completion_tokens = usage.get("completion_tokens")
+    tokens_per_sec = (
+        round(completion_tokens / gen_sec, 2)
+        if completion_tokens and gen_sec > 0
+        else None
+    )
+
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps(
-            {"output": text, "model": os.path.basename(MODEL_PATH)},
+            {
+                "output": text,
+                "model": os.path.basename(MODEL_PATH),
+                "usage": usage,
+                "gen_sec": gen_sec,
+                "model_load_sec": model_load_sec,
+                "tokens_per_sec": tokens_per_sec,
+            },
             ensure_ascii=False,
         ),
     }

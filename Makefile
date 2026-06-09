@@ -97,6 +97,15 @@ deploy: download setup ## ECR push＆Lambdaデプロイ（事前にモデルDL &
 remove: setup ## デプロイ済みスタックを削除
 	AWS_SDK_LOAD_CONFIG=1 npx serverless remove --aws-profile $(AWS_PROFILE)
 
+.PHONY: bench-all
+bench-all: setup ## 複数モデルを順に switch→build→remove→deploy→benchmark（再開可能・結果はbenchmark.csv）
+	AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) bash scripts/bench_all.sh
+
+.PHONY: benchmark
+benchmark: ## デプロイ済みLambdaの性能計測(tokens/sec・コールド・品質) を5回実行
+	AWS_PROFILE=$(AWS_PROFILE) FUNCTION_NAME=$(FUNCTION_NAME) AWS_REGION=$(AWS_REGION) \
+		python3 scripts/benchmark.py
+
 .PHONY: invoke-remote
 invoke-remote: ## デプロイ済みLambdaを直接invoke（PROMPT="..." / 認証済みAWSユーザ用）
 	@aws lambda invoke --function-name $(FUNCTION_NAME) --region $(AWS_REGION) --profile $(AWS_PROFILE) \

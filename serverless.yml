@@ -18,7 +18,8 @@ provider:
     NOTION_SECRET: ${env:NOTION_SECRET}
     LOG_LEVEL: ${env:LOG_LEVEL, 'INFO'}
   # コールドスタートでモデルロードが走るため余裕を持たせる。
-  timeout: 300
+  # 4B クラス(Phi-4-mini 等)はコールドで 300s を超えるため 600s に（Lambda 上限 900s）。
+  timeout: 600
   # Lambda はメモリ量に比例して CPU も増える＝推論が速くなる。
   # 3B クラスを動かすため最大(10240MB ≒ 6 vCPU)に設定。
   memorySize: 10240
