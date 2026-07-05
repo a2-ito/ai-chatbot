@@ -34,8 +34,10 @@ logger.debug("app.py 初期化開始")
 # --- LLM 設定（環境変数で上書き可） ---------------------------------------
 # MODEL_PATH はイメージに同梱した GGUF ファイルを指す。
 MODEL_PATH = os.environ.get("MODEL_PATH", "/opt/model/model.gguf")
-# コンテキスト長。Lambda のメモリ節約のため小さめに保つ。
-N_CTX = int(os.environ.get("N_CTX", "2048"))
+# コンテキスト長。Slack はスレッド全履歴を毎回送るため、小さいと会話が伸びた
+# 時点で "Requested tokens exceed context window" で落ちる。Qwen3 系は 32768 まで
+# 対応するので余裕を持たせる（10GB メモリなら KV キャッシュも十分収まる）。
+N_CTX = int(os.environ.get("N_CTX", "8192"))
 # CPU スレッド数。Lambda は 1769MB あたり約 1 vCPU。
 N_THREADS = int(os.environ.get("N_THREADS", str(os.cpu_count() or 2)))
 # 生成パラメータの既定値。
@@ -81,11 +83,55 @@ def strip_think(text: str) -> str:
     return text.strip()
 
 
+# Slack のメンション記号（<@U123> や <@U123|name>）を除去する。
+_MENTION_RE = re.compile(r"<@[^>]+>")
+
+
+def _clean(text: str) -> str:
+    return _MENTION_RE.sub("", text or "").strip()
+
+
+def _count_tokens(llm: "Llama", text: str) -> int:
+    if not text:
+        return 0
+    return len(llm.tokenize(text.encode("utf-8"), add_bos=False, special=False))
+
+
+def _fit_messages(
+    llm: "Llama", messages: list[dict[str, str]], max_tokens: int
+) -> list[dict[str, str]]:
+    """N_CTX に収まるよう system を残しつつ古い発言から間引く。
+
+    Slack のスレッド全履歴を送ると N_CTX を超えて推論が例外で落ちるため、
+    応答用トークン(max_tokens)と安全マージンを確保した予算内に収める。
+    新しい発言を優先して残す。
+    """
+    # 8 は chat テンプレートのロールマーカー等の概算オーバーヘッド、64 は安全マージン。
+    budget = N_CTX - max_tokens - 64
+    system = [m for m in messages if m["role"] == "system"]
+    rest = [m for m in messages if m["role"] != "system"]
+    used = sum(_count_tokens(llm, m["content"]) + 8 for m in system)
+    kept: list[dict[str, str]] = []
+    for m in reversed(rest):  # 新しい発言から詰める
+        cost = _count_tokens(llm, m["content"]) + 8
+        if kept and used + cost > budget:  # 直近1件は超過しても残す
+            break
+        used += cost
+        kept.append(m)
+    kept.reverse()
+    return system + kept
+
+
 def chat(messages: list[dict[str, str]], max_tokens: int, temperature: float) -> str:
     """messages 形式の会話履歴から応答テキストを生成する。"""
     llm = get_llm()
+    fitted = _fit_messages(llm, messages, max_tokens)
+    if len(fitted) < len(messages):
+        logger.info(
+            "文脈超過のため古い発言を間引き: %d → %d 件", len(messages), len(fitted)
+        )
     result = llm.create_chat_completion(
-        messages=messages,
+        messages=fitted,
         max_tokens=max_tokens,
         temperature=temperature,
     )
@@ -161,29 +207,26 @@ def run_long_process(body, say):
             thread_ts = mention["ts"]
             logger.debug("新規スレッド ts=%s", thread_ts)
 
-        threadContent = []
+        threadContent: list[dict[str, str]] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+        ]
 
-        threadContent.append({
-            "role": "system",
-            "content": SYSTEM_PROMPT,
-        })
-
-        threadContent.append({
-            "role": "user",
-            "content": text,
-        })
-
-        for message in threadMessages:
-            if message["user"] == get_bot_user_id():
-                threadContent.append({
-                    "role": "assistant",
-                    "content": message["text"],
-                })
-            else:
-                threadContent.append({
-                    "role": "user",
-                    "content": message["text"],
-                })
+        if threadMessages:
+            # conversations_replies は現在のメンションを含む全履歴を時系列で返す。
+            # これをそのまま会話履歴として使う（現在発言を別途 append すると二重になり、
+            # かつ system 直後に置くと時系列が崩れる）。
+            bot_id = get_bot_user_id()
+            for message in threadMessages:
+                is_bot = message.get("user") == bot_id or "bot_id" in message
+                content = _clean(message.get("text", ""))
+                if content:
+                    threadContent.append({
+                        "role": "assistant" if is_bot else "user",
+                        "content": content,
+                    })
+        else:
+            # 新規スレッド（履歴なし）: 現在のメンション本文のみを user として渡す。
+            threadContent.append({"role": "user", "content": _clean(text)})
 
         logger.debug("LLM 推論開始 messages=%d 件", len(threadContent))
         resText = chat(threadContent, DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE)
