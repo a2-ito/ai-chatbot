@@ -1,27 +1,27 @@
-FROM amazonlinux:2023
+# AWS Lambda Python base image (Amazon Linux 2023).
+# This image already bundles the Lambda Runtime Interface Emulator (RIE),
+# so the exact same image runs both locally and on AWS Lambda.
+FROM public.ecr.aws/lambda/python:3.12
 
-ENV NODE_VERSION 20.13.0
+# --- Build dependencies for compiling llama-cpp-python ----------------------
+# llama-cpp-python builds the native llama.cpp library from source, so we
+# need a C/C++ toolchain and cmake. These are only used at build time.
+RUN dnf install -y gcc gcc-c++ make cmake && dnf clean all
 
-RUN dnf update
-RUN dnf install -y git tar make vim gcc zlib-devel bzip2-devel readline-devel sqlite sqlite-devel openssl-devel tk-devel libffi-devel xz-devel
+# --- Python dependencies ----------------------------------------------------
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+# Force a CPU-only build (no CUDA/Metal) optimized for the Lambda runtime.
+ENV CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_METAL=OFF"
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
-RUN touch /root/.bashrc
+# --- Model ------------------------------------------------------------------
+# The GGUF model is downloaded into ./model by scripts/download_model.sh
+# BEFORE building, then baked into the image at /opt/model.
+COPY model/model.gguf /opt/model/model.gguf
+ENV MODEL_PATH=/opt/model/model.gguf
 
-ADD https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh .
-RUN bash install.sh
-RUN source /root/.bashrc && nvm install v$NODE_VERSION
+# --- Application ------------------------------------------------------------
+COPY app.py ${LAMBDA_TASK_ROOT}/
 
-RUN source /root/.bashrc && npm install -g serverless@3.39.0
-
-COPY . /app
-
-RUN mkdir /root/.aws
-RUN touch /root/.aws/config
-
-# RUN source /root/.bashrc && cd /app/gemini && serverless plugin install -n serverless-offline
-# RUN source /root/.bashrc && cd /app/gemini && serverless plugin install -n serverless-python-requirements
-
-RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-# RUN curl https://pyenv.run | bash
-
-# RUN source /root/.bashrc && pyenv install 3.11.5
+# Lambda handler entry point: <file>.<function>
+CMD ["app.handler"]

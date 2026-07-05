@@ -1,0 +1,14 @@
+# Keep the build context small. The model is copied explicitly,
+# but everything else non-essential is excluded.
+.git
+README.md
+scripts/
+gemini/
+*.md
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env*
+.serverless
+node_modules/

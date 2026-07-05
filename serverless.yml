@@ -3,14 +3,26 @@ frameworkVersion: '3'
 useDotenv: true
 provider:
   name: aws
-  runtime: python3.10
+  # Graviton(arm64)。Apple Silicon でネイティブビルドでき推論も速い。
+  # x86_64 にする場合は arm64 → x86_64、ecr.images.*.platform も linux/amd64 に。
+  architecture: arm64
+  # コンテナイメージ定義。sls deploy 時に docker build → ECR push まで実施。
+  ecr:
+    images:
+      ai-chat:
+        path: ./
+        platform: linux/arm64
   environment:
     SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
-    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
     NOTION_SECRET: ${env:NOTION_SECRET}
     LOG_LEVEL: ${env:LOG_LEVEL, 'INFO'}
-  timeout: 30
+  # コールドスタートでモデルロードが走るため余裕を持たせる。
+  # 4B クラス(Phi-4-mini 等)はコールドで 300s を超えるため 600s に（Lambda 上限 900s）。
+  timeout: 600
+  # Lambda はメモリ量に比例して CPU も増える＝推論が速くなる。
+  # 3B クラスを動かすため最大(10240MB ≒ 6 vCPU)に設定。
+  memorySize: 10240
   iam:
     role:
       statements:
@@ -22,13 +34,13 @@ provider:
           Resource: "*"
 functions:
   slack:
-    handler: app.handler
+    image:
+      name: ai-chat
+    # Slack の Event Subscriptions 受け口（API Gateway REST API）。
+    # 別案として Lambda Function URL も使えるが注意点あり → README「Function URL 版メモ」参照。
     events:
       - http:
           path: slack/events
           method: post
-    reservedConcurrency: 1
 plugins:
-  - serverless-offline
-  - serverless-python-requirements
   - serverless-better-credentials

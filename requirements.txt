@@ -1,4 +1,7 @@
 slack_bolt
-openai==0.27.0
-# openai==2.1.0
 commonmark-slack
+# CPU build of llama.cpp Python bindings.
+# Pinned for reproducible Lambda images.
+# 0.3.28: 新しめの llama.cpp を同梱し Phi-4 / Qwen3 / Gemma3 等の新アーキに対応
+# （0.3.2 はこれらを "Failed to load model" で弾いていた）。
+llama-cpp-python==0.3.28

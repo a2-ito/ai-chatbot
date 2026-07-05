@@ -4,3 +4,10 @@
 node_modules/
 package*.json
 .python-version
+# GGUF モデル本体は容量が大きいため Git 管理外
+model/
+__pycache__/
+*.pyc
+# ベンチマーク結果（ログ・CSV）
+benchmark.log
+benchmark*.csv
