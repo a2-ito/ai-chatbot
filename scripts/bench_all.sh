@@ -25,7 +25,13 @@ MODELS=(
   "SmolLM2-135M|bartowski/SmolLM2-135M-Instruct-GGUF|SmolLM2-135M-Instruct-Q4_K_M.gguf"
   "SmolLM2-360M|bartowski/SmolLM2-360M-Instruct-GGUF|SmolLM2-360M-Instruct-Q4_K_M.gguf"
   "SmolLM2-1.7B|HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF|smollm2-1.7b-instruct-q4_k_m.gguf"
-  "Phi-4-mini|unsloth/Phi-4-mini-instruct-GGUF|Phi-4-mini-instruct-Q4_K_M.gguf"
+  # Qwen3 / Gemma3（0.3.28 でロード可能になった新アーキ）
+  "Qwen3-1.7B|bartowski/Qwen_Qwen3-1.7B-GGUF|Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+  "Qwen3-4B|Qwen/Qwen3-4B-GGUF|Qwen3-4B-Q4_K_M.gguf"
+  "Gemma3-1B|ggml-org/gemma-3-1b-it-GGUF|gemma-3-1b-it-Q4_K_M.gguf"
+  "Gemma3-4B|ggml-org/gemma-3-4b-it-GGUF|gemma-3-4b-it-Q4_K_M.gguf"
+  # Phi-4-mini(~4B) は重すぎて実用外（300sでtimeout実証済）のため既定除外。必要なら手動追加。
+  # "Phi-4-mini|unsloth/Phi-4-mini-instruct-GGUF|Phi-4-mini-instruct-Q4_K_M.gguf"
 )
 
 log() { printf '\n\033[1;36m[bench-all] %s\033[0m\n' "$*"; }
