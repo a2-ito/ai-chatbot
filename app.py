@@ -12,13 +12,23 @@ import commonmarkslack
 # llama_cpp は重いネイティブlib。ack 経路のコールド初期化を軽くするため、
 # モジュール読み込み時ではなく get_llm() 内で遅延 import する。
 
-# ログ設定: LOG_LEVEL 環境変数で制御（DEBUG, INFO, WARNING, ERROR）
+# ログ設定: LOG_LEVEL 環境変数で制御（DEBUG, INFO, WARNING, ERROR）。
+# Lambda ではランタイムが起動時にルートロガーへハンドラを付けているため
+# logging.basicConfig() は no-op になり、レベル・フォーマットが適用されない
+# （＝ INFO/DEBUG が既定の WARNING に握りつぶされる）。ハンドラ有無で分岐し、
+# Lambda 実行環境では明示的にレベルを設定する。
 log_level = (os.getenv("LOG_LEVEL") or "INFO").upper()
-logging.basicConfig(
-    level=getattr(logging, log_level, logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+_level = getattr(logging, log_level, logging.INFO)
+_root = logging.getLogger()
+if _root.handlers:  # Lambda 実行環境（既存ハンドラあり）
+    _root.setLevel(_level)
+else:  # ローカル実行
+    logging.basicConfig(
+        level=_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
 logger = logging.getLogger(__name__)
+logger.setLevel(_level)
 logger.debug("app.py 初期化開始")
 
 # --- LLM 設定（環境変数で上書き可） ---------------------------------------
@@ -33,7 +43,8 @@ DEFAULT_MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "256"))
 DEFAULT_TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.7"))
 
 SYSTEM_PROMPT = """あなたは Chief AI Officer です。
-あなたは社員のカウンターパートとして社員の親身になって相談に乗ってください。"""
+あなたは社員のカウンターパートとして社員の親身になって相談に乗ってください。
+/no_think"""
 
 
 @lru_cache(maxsize=1)
