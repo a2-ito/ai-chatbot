@@ -41,7 +41,9 @@ N_CTX = int(os.environ.get("N_CTX", "8192"))
 # CPU スレッド数。Lambda は 1769MB あたり約 1 vCPU。
 N_THREADS = int(os.environ.get("N_THREADS", str(os.cpu_count() or 2)))
 # 生成パラメータの既定値。
-DEFAULT_MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "256"))
+# MAX_TOKENS が小さいと日本語の長い回答が finish_reason=length で途中で切れる。
+# N_CTX(8192) との合計制約があるため、大きくしすぎるとスレッド履歴が間引かれる点に注意。
+DEFAULT_MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "1024"))
 DEFAULT_TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.7"))
 
 SYSTEM_PROMPT = """あなたは Chief AI Officer です。
@@ -135,7 +137,15 @@ def chat(messages: list[dict[str, str]], max_tokens: int, temperature: float) ->
         max_tokens=max_tokens,
         temperature=temperature,
     )
-    return strip_think(result["choices"][0]["message"]["content"])
+    choice = result["choices"][0]
+    text = strip_think(choice["message"]["content"])
+    # max_tokens 到達で途中打ち切りになった場合は注記を添える。
+    # （思考ブロック内で打ち切られ strip_think が空を返すケースも、これで注記のみになる）
+    if choice.get("finish_reason") == "length":
+        logger.info("応答が max_tokens=%d で打ち切られました", max_tokens)
+        notice = "（※回答が長いため途中で省略されました）"
+        text = f"{text}\n\n{notice}".strip()
+    return text
 
 
 app = App(
