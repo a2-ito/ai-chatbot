@@ -17,6 +17,8 @@ provider:
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
     NOTION_SECRET: ${env:NOTION_SECRET}
     LOG_LEVEL: ${env:LOG_LEVEL, 'INFO'}
+    # 文脈長。Slack はスレッド全履歴を毎回送るため小さいと会話継続で落ちる。
+    N_CTX: ${env:N_CTX, '8192'}
   # コールドスタートでモデルロードが走るため余裕を持たせる。
   # 4B クラス(Phi-4-mini 等)はコールドで 300s を超えるため 600s に（Lambda 上限 900s）。
   timeout: 600
