@@ -17,7 +17,10 @@
   JUDGE           (既定 1)         0 で品質採点をスキップ
   JUDGE_BACKEND   (既定 auto)      auto / sdk(APIキー) / cli(claude -p) / off
   JUDGE_MODEL     (既定 claude-opus-4-8)
-  COLD_EACH       (既定 0)         1 で毎回コールドを強制（5回コールド計測・低速）
+  DEPLOY_COLD     (既定 1)         1 で deploy_cold_s（新規デプロイ直後の初回invoke）を計測。
+                                   remove→deploy 直後でない単独実行では 0 にする（不正確になるため）。
+  RECYCLE_COLD    (既定 1)         1 で cold_start_s（description更新でコンテナ強制リサイクル後）を計測。
+  COLD_EACH       (既定 0)         1 で毎回リサイクルコールドを強制（5回計測・低速。cold_start_s に記録）。
   BENCH_LOG       (既定 benchmark.log)
 """
 
@@ -42,6 +45,13 @@ RUNS = int(os.environ.get("RUNS", "5"))
 JUDGE = os.environ.get("JUDGE", "1") != "0"
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-opus-4-8")
 COLD_EACH = os.environ.get("COLD_EACH", "0") == "1"
+# コールドは2種類を別々に計測する（意味が異なるため列も分ける）。
+#   deploy_cold_s : 新規デプロイ直後の初回invoke。イメージpull/最適化込みの最悪ケース。
+#                   呼び出し側が直前に remove→deploy 済みである前提（そうでないと正確でない）。
+#   cold_start_s  : description 更新でコンテナを強制リサイクルした後のinvoke。稼働中関数の
+#                   スケールアップ相当（イメージはフリート側にキャッシュ済み）。
+DEPLOY_COLD = os.environ.get("DEPLOY_COLD", "1") != "0"
+RECYCLE_COLD = os.environ.get("RECYCLE_COLD", "1") != "0"
 BENCH_LOG = os.environ.get("BENCH_LOG", "benchmark.log")
 BENCH_CSV = os.environ.get("BENCH_CSV", "benchmark.csv")
 MODEL_LABEL = os.environ.get("MODEL_LABEL", "")  # スプレッドシート用のモデル表示名（空なら応答のmodel名）
@@ -74,8 +84,9 @@ JUDGE_SCHEMA = {
 
 def make_lambda_client():
     session = boto3.Session(profile_name=AWS_PROFILE) if AWS_PROFILE else boto3.Session()
-    # コールド/重いモデルに備え読取りタイムアウトは長め（Lambda timeout より大きく）。SDK リトライは無効。
-    read_to = int(os.environ.get("BENCH_READ_TIMEOUT", "310"))
+    # コールド/重いモデルに備え読取りタイムアウトは長め（Lambda timeout=600s より大きく）。SDK リトライは無効。
+    # 既定 310s だと 1.7B 等のデプロイコールドがモデルロード込みで超過し ReadTimeout で計測を取り逃す。
+    read_to = int(os.environ.get("BENCH_READ_TIMEOUT", "610"))
     cfg = Config(read_timeout=read_to, connect_timeout=10, retries={"max_attempts": 0})
     return session.client("lambda", region_name=AWS_REGION, config=cfg)
 
@@ -229,20 +240,30 @@ def main() -> int:
     emit("=" * 72)
     emit(f"LLM on Lambda ベンチマーク  ({started})")
     emit(f"  function={FUNCTION_NAME}  region={AWS_REGION}  runs={RUNS}  max_tokens={MAX_TOKENS}")
-    emit(f"  judge={judge_label}  cold_each={COLD_EACH}")
+    emit(f"  judge={judge_label}  deploy_cold={DEPLOY_COLD}  recycle_cold={RECYCLE_COLD}  cold_each={COLD_EACH}")
     emit("=" * 72)
 
-    # ---- コールドスタート計測（COLD_EACH でなければ1回） ----
-    cold_samples: list[dict] = []
+    # ---- コールド計測（2種類を別々に、COLD_EACH でなければ各1回） ----
+    # 順序が重要: 先に「デプロイコールド」（一度でも invoke すると環境が温まり再現不可）、
+    # 次に force_cold でリサイクルして「リサイクルコールド」を測る。
+    deploy_cold: dict | None = None
+    recycle_cold: dict | None = None
     if not COLD_EACH:
-        emit("\n[コールドスタート] コンテナ強制リセット → 初回 invoke 計測中 ...")
-        force_cold(lc)
-        r = invoke(lc, prompts[0])
-        cold_samples.append(r)
-        if r["error"]:
-            emit(f"  ✖ エラー: {r['error']}")
-        else:
-            emit(f"  総時間={r['latency']}s  モデルロード={r['model_load_sec']}s  生成={r['gen_sec']}s")
+        if DEPLOY_COLD:
+            emit("\n[デプロイコールド] 新規デプロイ直後の初回 invoke 計測中 ...")
+            deploy_cold = invoke(lc, prompts[0])
+            if deploy_cold["error"]:
+                emit(f"  ✖ エラー: {deploy_cold['error']}")
+            else:
+                emit(f"  総時間={deploy_cold['latency']}s  モデルロード={deploy_cold['model_load_sec']}s  生成={deploy_cold['gen_sec']}s")
+        if RECYCLE_COLD:
+            emit("\n[リサイクルコールド] コンテナ強制リセット → invoke 計測中 ...")
+            force_cold(lc)
+            recycle_cold = invoke(lc, prompts[0])
+            if recycle_cold["error"]:
+                emit(f"  ✖ エラー: {recycle_cold['error']}")
+            else:
+                emit(f"  総時間={recycle_cold['latency']}s  モデルロード={recycle_cold['model_load_sec']}s  生成={recycle_cold['gen_sec']}s")
 
     # ---- warm 実行（tokens/sec & 品質） ----
     emit(f"\n[テスト実行] {RUNS} 回")
@@ -267,7 +288,19 @@ def main() -> int:
     # ---- 集計 ----
     tps_vals = [r["tokens_per_sec"] for r in results if r["tokens_per_sec"] is not None]
     score_vals = [r["score"] for r in results if isinstance(r["score"], int)]
-    cold_vals = [r["latency"] for r in (cold_samples if not COLD_EACH else results) if not r["error"]]
+
+    def cold_latency(s):
+        return s["latency"] if (s and not s["error"]) else None
+
+    # deploy_cold_s: 新規デプロイ直後の初回invoke（1サンプル）。
+    # cold_start_s : リサイクルコールド。COLD_EACH の場合は warm 各 run が都度リサイクルなので平均を採る。
+    deploy_cold_s = cold_latency(deploy_cold)
+    if COLD_EACH:
+        recycle_vals = [r["latency"] for r in results if not r["error"]]
+        cold_start_s = None  # 各 run 個別に記録するため代表値は持たない
+    else:
+        recycle_vals = [v for v in (cold_latency(recycle_cold),) if v is not None]
+        cold_start_s = cold_latency(recycle_cold)
 
     def avg(xs):
         return round(sum(xs) / len(xs), 2) if xs else None
@@ -275,10 +308,12 @@ def main() -> int:
     emit("\n" + "-" * 72)
     emit("【サマリ】")
     emit(f"  tokens/sec       : 平均 {avg(tps_vals)}  (min {min(tps_vals) if tps_vals else None} / max {max(tps_vals) if tps_vals else None}, n={len(tps_vals)})")
-    if not COLD_EACH:
-        emit(f"  コールドスタート : {cold_vals[0] if cold_vals else 'N/A'}s  (1サンプル)")
-    else:
-        emit(f"  コールドスタート : 平均 {avg(cold_vals)}s  (min {min(cold_vals) if cold_vals else None} / max {max(cold_vals) if cold_vals else None}, n={len(cold_vals)})")
+    if DEPLOY_COLD and not COLD_EACH:
+        emit(f"  デプロイコールド : {deploy_cold_s if deploy_cold_s is not None else 'N/A'}s  (1サンプル)")
+    if COLD_EACH:
+        emit(f"  リサイクルコールド: 平均 {avg(recycle_vals)}s  (min {min(recycle_vals) if recycle_vals else None} / max {max(recycle_vals) if recycle_vals else None}, n={len(recycle_vals)})")
+    elif RECYCLE_COLD:
+        emit(f"  リサイクルコールド: {cold_start_s if cold_start_s is not None else 'N/A'}s  (1サンプル)")
     if judge:
         emit(f"  体感品質(1-5)    : 平均 {avg(score_vals)}  (n={len(score_vals)})")
     else:
@@ -299,12 +334,13 @@ def main() -> int:
             emit(f"採点理由: {r['reason']}")
 
     # ---- CSV 追記出力（スプレッドシート貼り付け用・実行ごとに各run 1行を追記） ----
-    cold_s = cold_vals[0] if (not COLD_EACH and cold_vals) else None
+    # deploy_cold_s: 全 run 同値（1サンプルの転記）。
+    # cold_start_s : COLD_EACH では各 run のリサイクルコールド、それ以外は 1サンプルの転記。
     model_name = MODEL_LABEL or next((r["model"] for r in results if r.get("model")), "")
     csv_header = [
         "timestamp", "model", "function", "run", "prompt",
         "tokens_per_sec", "gen_sec", "model_load_sec", "latency_s",
-        "cold_start_s", "quality_score", "quality_reason", "output",
+        "deploy_cold_s", "cold_start_s", "quality_score", "quality_reason", "output",
     ]
     try:
         new_file = (not os.path.exists(BENCH_CSV)) or os.path.getsize(BENCH_CSV) == 0
@@ -313,10 +349,11 @@ def main() -> int:
             if new_file:
                 w.writerow(csv_header)
             for i, r in enumerate(results, 1):
+                row_cold_start = r["latency"] if COLD_EACH else cold_start_s
                 w.writerow([
                     started, model_name, FUNCTION_NAME, i, r["prompt"],
                     r["tokens_per_sec"], r["gen_sec"], r["model_load_sec"], r["latency"],
-                    (r["latency"] if COLD_EACH else cold_s), r["score"], r["reason"], r["output"],
+                    deploy_cold_s, row_cold_start, r["score"], r["reason"], r["output"],
                 ])
         emit(f"\n[csv] {BENCH_CSV} に {len(results)} 行を追記しました")
     except OSError as e:

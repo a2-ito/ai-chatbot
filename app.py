@@ -46,9 +46,13 @@ N_THREADS = int(os.environ.get("N_THREADS", str(os.cpu_count() or 2)))
 DEFAULT_MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "1024"))
 DEFAULT_TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.7"))
 
-SYSTEM_PROMPT = """あなたは Chief AI Officer です。
-あなたは社員のカウンターパートとして社員の親身になって相談に乗ってください。
-/no_think"""
+# Qwen3 系は SYSTEM_PROMPT 末尾に /no_think を付けると思考ブロック(<think>...</think>)を
+# 抑制できる。NO_THINK=1(既定) で従来通り nothink 運用、NO_THINK=0 で思考モードを有効化。
+NO_THINK = os.environ.get("NO_THINK", "1") != "0"
+
+_BASE_PROMPT = """あなたは Chief AI Officer です。
+あなたは社員のカウンターパートとして社員の親身になって相談に乗ってください。"""
+SYSTEM_PROMPT = _BASE_PROMPT + ("\n/no_think" if NO_THINK else "")
 
 
 @lru_cache(maxsize=1)
