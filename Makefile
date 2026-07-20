@@ -101,6 +101,10 @@ remove: setup ## デプロイ済みスタックを削除
 bench-all: setup ## 複数モデルを順に switch→build→remove→deploy→benchmark（再開可能・結果はbenchmark.csv）
 	AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) bash scripts/bench_all.sh
 
+.PHONY: bench-qwen
+bench-qwen: setup ## Qwen3再計測（毎回remove→deployでcold計測）。LABELS="Qwen3-1.7B" で対象を限定可
+	AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) bash scripts/bench_qwen_rerun.sh $(LABELS)
+
 .PHONY: benchmark
 benchmark: ## デプロイ済みLambdaの性能計測(tokens/sec・コールド・品質) を5回実行
 	AWS_PROFILE=$(AWS_PROFILE) FUNCTION_NAME=$(FUNCTION_NAME) AWS_REGION=$(AWS_REGION) \

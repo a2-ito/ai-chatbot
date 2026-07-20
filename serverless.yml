@@ -19,6 +19,11 @@ provider:
     LOG_LEVEL: ${env:LOG_LEVEL, 'INFO'}
     # 文脈長。Slack はスレッド全履歴を毎回送るため小さいと会話継続で落ちる。
     N_CTX: ${env:N_CTX, '8192'}
+    # 生成トークン上限。小さいと日本語の長い回答が途中で切れる。
+    # N_CTX との合計制約があるため上げる場合は N_CTX とのバランスに注意。
+    MAX_TOKENS: ${env:MAX_TOKENS, '1024'}
+    # Qwen3 系の思考モード制御。1(既定)=nothink(/no_think付与), 0=思考モード有効。
+    NO_THINK: ${env:NO_THINK, '1'}
   # コールドスタートでモデルロードが走るため余裕を持たせる。
   # 4B クラス(Phi-4-mini 等)はコールドで 300s を超えるため 600s に（Lambda 上限 900s）。
   timeout: 600
