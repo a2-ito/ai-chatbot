@@ -1,0 +1,14 @@
+# ダウンロードした GGUF モデル（イメージにのみ焼き込む）
+model/
+# Serverless / Node
+node_modules/
+package.json
+package-lock.json
+.serverless/
+# 環境変数（実値）
+.env
+# Python
+__pycache__/
+*.pyc
+# ベンチマーク結果
+benchmark.csv

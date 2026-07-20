@@ -1,0 +1,14 @@
+# ビルドコンテキストを小さく保つ。モデルは model/model.gguf を明示的に COPY し、
+# それ以外の非本質ファイルは除外する。
+.git
+README.md
+scripts/
+*.md
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env*
+.serverless
+node_modules/
+models.env
