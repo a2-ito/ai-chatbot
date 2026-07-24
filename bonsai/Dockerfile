@@ -26,22 +26,35 @@ WORKDIR /src/llama.cpp
 # GGML_NATIVE=OFF: ビルドホスト固有の CPU 命令に最適化させない（実行環境での
 #   "illegal instruction" を回避。arm64 の NEON は既定で有効）。
 # LLAMA_CURL=OFF: モデルは同梱するため HTTP ダウンロード機能は不要（libcurl 依存を外す）。
+# LLAMA_BUILD_EXAMPLES=OFF: llama-server だけをビルドする。
+# cmake --install は使わない: 全ターゲット(tools/batched-bench 等)のインストール
+#   ルールが生成されるため、--target llama-server だけをビルドすると未ビルドの
+#   バイナリ/共有ライブラリを探して失敗する。必要な成果物は次の RUN で直接拾う。
 RUN cmake -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DGGML_NATIVE=OFF \
       -DLLAMA_CURL=OFF \
       -DLLAMA_BUILD_TESTS=OFF \
-      -DLLAMA_BUILD_EXAMPLES=ON \
+      -DLLAMA_BUILD_EXAMPLES=OFF \
       -DLLAMA_BUILD_SERVER=ON \
- && cmake --build build --target llama-server -j "$(nproc)" \
- && cmake --install build --prefix /opt/llama
+ && cmake --build build --target llama-server -j "$(nproc)"
 
-# 共有ライブラリを含め、実行に必要な成果物を確実に集約する。
-# （cmake --install が bin/llama-server と lib/*.so を配置するが、
-#   一部バックエンド .so は build/bin にしか無いことがあるため両方拾う。）
+# 実行に必要な成果物（llama-server バイナリと全共有ライブラリ）を集約する。
+# バイナリが無ければ即失敗させる（壊れたイメージを作らない）。.so は
+# バックエンドを含め build 配下から漏れなく拾う。cp -P で SONAME の
+# シンボリックリンク(libggml-base.so.0 → *.so.0.x.y)も保持する。実体だけ
+# コピーするとローダーが .so.0 を見つけられず exit=127 で落ちる。
 RUN mkdir -p /opt/llama/bin /opt/llama/lib \
- && cp -f build/bin/llama-server /opt/llama/bin/ 2>/dev/null || true \
- && find build -name '*.so' -exec cp -f {} /opt/llama/lib/ \; 2>/dev/null || true
+ && cp -f build/bin/llama-server /opt/llama/bin/ \
+ && find build -name '*.so*' -exec cp -Pf {} /opt/llama/lib/ \;
+
+# 依存する共有ライブラリが実行環境の探索パス(/opt/llama/lib)で解決できるか
+# ビルド時に検証する。"not found" が残っていれば即失敗させ、壊れたイメージが
+# ECR に上がるのを防ぐ。
+RUN LD_LIBRARY_PATH=/opt/llama/lib ldd /opt/llama/bin/llama-server | tee /tmp/ldd.txt \
+ && if grep -q 'not found' /tmp/ldd.txt; then \
+      echo 'ERROR: llama-server に未解決の共有ライブラリがあります'; exit 1; \
+    fi
 
 # --- final: 実行イメージ -----------------------------------------------------
 FROM public.ecr.aws/lambda/python:3.12
