@@ -30,6 +30,9 @@ MODELS=(
   "Qwen3-4B|Qwen/Qwen3-4B-GGUF|Qwen3-4B-Q4_K_M.gguf"
   "Gemma3-1B|ggml-org/gemma-3-1b-it-GGUF|gemma-3-1b-it-Q4_K_M.gguf"
   "Gemma3-4B|ggml-org/gemma-3-4b-it-GGUF|gemma-3-4b-it-Q4_K_M.gguf"
+  # GLM-Edge（Zhipu AI / THUDM。llama.cpp b4028+ で対応）
+  "GLM-Edge-1.5B|zai-org/glm-edge-1.5b-chat-gguf|ggml-model-Q4_K_M.gguf"
+  "GLM-Edge-4B|zai-org/glm-edge-4b-chat-gguf|ggml-model-Q4_K_M.gguf"
   # Phi-4-mini(~4B) は重すぎて実用外（300sでtimeout実証済）のため既定除外。必要なら手動追加。
   # "Phi-4-mini|unsloth/Phi-4-mini-instruct-GGUF|Phi-4-mini-instruct-Q4_K_M.gguf"
 )

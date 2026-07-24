@@ -69,6 +69,7 @@ make which-model     # 取得済みモデルを確認
 | Qwen3 | 0.6B / 1.7B / 4B | 0.5 / 1.1 / 2.5 GB |
 | Gemma 3 | 1B / 4B | 0.8 / 2.5 GB |
 | Phi-4-mini | 4B | 2.5 GB |
+| GLM-Edge | 1.5B / 4B | 1.0 / 2.6 GB |
 | SmolLM2 | 135M / 360M / 1.7B | 0.1 / 0.3 / 1.1 GB |
 
 ## 4. ローカルで動作確認（RIE）
