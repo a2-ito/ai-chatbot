@@ -72,3 +72,26 @@ jobs:
           AWS_SECRET_ACCESS_KEY: dummy
           AWS_REGION: us-east-1
         run: npx serverless package
+
+  # bonsai（PrismML / コンテナモード）: docker build でイメージを検証する。
+  # PrismML fork の llama.cpp をソースビルドして llama-server を同梱するため、
+  # Dockerfile + requirements の妥当性を docker build で検証する。
+  # モデル(GGUF)は実行しないため、CI では COPY を通すためのダミーを置くだけにし、
+  # 数百MBのDLを避ける（fork のフルビルド検証が主目的）。
+  bonsai-container-build:
+    name: docker build (bonsai)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # COPY model/model.gguf を通すためのダミー（実行はしないので中身は空でよい）。
+      - name: Create dummy model
+        working-directory: bonsai
+        run: mkdir -p model && touch model/model.gguf
+
+      # CI ランナーは x86_64 のため linux/amd64 でネイティブビルド（QEMU 不要）。
+      # fork llama.cpp のソースビルドが走るため時間がかかる。
+      - name: Docker build
+        working-directory: bonsai
+        run: docker build --platform linux/amd64 -t ai-chat-bonsai:ci .

@@ -1,0 +1,4 @@
+slack_bolt
+commonmark-slack
+# 同梱した llama-server(OpenAI 互換) を localhost で叩くための HTTP クライアント。
+requests

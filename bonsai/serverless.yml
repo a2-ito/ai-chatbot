@@ -1,0 +1,43 @@
+# Bonsai (PrismML) 検証用スタック。open-llm(ルート)とは別デプロイ単位のため
+# service 名を分ける。推論エンジンは同梱の llama-server(fork) をコンテナ内で起動。
+service: ai-chat-bonsai
+frameworkVersion: '3'
+useDotenv: true
+provider:
+  name: aws
+  # Graviton(arm64)。Apple Silicon でネイティブビルドでき、fork も NEON 対応。
+  # x86_64 にする場合は arm64 → x86_64、ecr.images.*.platform も linux/amd64 に。
+  architecture: arm64
+  # コンテナイメージ定義。sls deploy 時に docker build → ECR push まで実施。
+  ecr:
+    images:
+      ai-chat-bonsai:
+        path: ./
+        platform: linux/arm64
+  environment:
+    SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
+    SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
+    LOG_LEVEL: ${env:LOG_LEVEL, 'INFO'}
+  # コールドスタートで llama-server 起動＋モデルロードが走るため余裕を持たせる。
+  timeout: 600
+  # Lambda はメモリ量に比例して CPU も増える＝推論が速くなる。最大に設定。
+  memorySize: 10240
+  iam:
+    role:
+      statements:
+        # Lazy Listeners を利用するために必要
+        - Effect: Allow
+          Action:
+            - lambda:InvokeFunction
+            - lambda:InvokeAsync
+          Resource: "*"
+functions:
+  slack:
+    image:
+      name: ai-chat-bonsai
+    events:
+      - http:
+          path: slack/events
+          method: post
+plugins:
+  - serverless-better-credentials
