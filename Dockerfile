@@ -23,5 +23,10 @@ ENV MODEL_PATH=/opt/model/model.gguf
 # --- Application ------------------------------------------------------------
 COPY app.py ${LAMBDA_TASK_ROOT}/
 
+# root で動かさない（Trivy DS-0002）。Lambda の基盤イメージには一般ユーザーが無いので数値で指定する。
+# AWS 上の Lambda は自前の一般ユーザーで実行するので変わらず、手元の RIE での実行も root ではなくなる。
+# 書き込みは /tmp だけで、アプリとモデルは読めれば足りる
+USER 1000:1000
+
 # Lambda handler entry point: <file>.<function>
 CMD ["app.handler"]
