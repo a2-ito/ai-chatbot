@@ -33,7 +33,7 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import boto3
 from botocore.config import Config
@@ -199,6 +199,7 @@ def _make_cli_judge():
                 capture_output=True,
                 text=True,
                 timeout=150,
+                check=False,
             )
             if r.returncode != 0:
                 return {
@@ -277,7 +278,7 @@ def main() -> int:
         print(s)
         lines.append(s)
 
-    started = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+    started = datetime.now(UTC).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
     emit("=" * 72)
     emit(f"LLM on Lambda ベンチマーク  ({started})")
     emit(

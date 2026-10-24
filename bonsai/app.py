@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import os
-import json
-import time
 import atexit
+import json
 import logging
+import os
 import subprocess
+import time
 from functools import lru_cache
 from typing import Any
 
+import commonmarkslack
 import requests
 from slack_bolt import App
-import commonmarkslack
 
 # log 設定: LOG_LEVEL 環境変数で制御（DEBUG, INFO, WARNING, ERROR）。
 # Lambda ではランタイムが起動時にルートロガーへハンドラを付けているため
@@ -165,8 +165,8 @@ def get_bot_user_id():
         user_id = result["user_id"]
         logger.info("Bot user_id 取得成功: %s", user_id)
         return user_id
-    except Exception as e:
-        logger.exception("auth_test 失敗（botUserId は None になります）: %s", e)
+    except Exception:
+        logger.exception("auth_test 失敗（botUserId は None になります）")
         return None
 
 
@@ -193,12 +193,11 @@ def fetch_thread_messages(channel, thread_ts):
         messages = thread_messages_response["messages"]
         logger.debug("スレッドメッセージ取得完了: %d 件", len(messages))
         return messages
-    except Exception as e:
+    except Exception:
         logger.exception(
-            "conversations_replies 失敗 channel=%s thread_ts=%s: %s",
+            "conversations_replies 失敗 channel=%s thread_ts=%s",
             channel,
             thread_ts,
-            e,
         )
         raise
 
@@ -241,8 +240,8 @@ def run_long_process(body, say):
         slack_md = renderer.render(parser.parse(resText))
         say(text=slack_md, channel=channel, thread_ts=thread_ts)
         logger.info("run_long_process 完了 Slack に応答送信")
-    except Exception as e:
-        logger.exception("run_long_process 失敗: %s", e)
+    except Exception:
+        logger.exception("run_long_process 失敗")
         raise
 
 
@@ -341,6 +340,6 @@ def handler(event, context):
             result.get("statusCode") if isinstance(result, dict) else "N/A",
         )
         return result
-    except Exception as e:
-        logger.exception("Lambda handler 失敗: %s", e)
+    except Exception:
+        logger.exception("Lambda handler 失敗")
         raise

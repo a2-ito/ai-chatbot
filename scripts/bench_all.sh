@@ -12,7 +12,7 @@
 #
 set -uo pipefail
 
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 
 export AWS_PROFILE="${AWS_PROFILE:-playground}"
 export AWS_REGION="${AWS_REGION:-us-east-1}"
