@@ -1,7 +1,7 @@
 # Bonsai (PrismML) 検証用スタック。open-llm(ルート)とは別デプロイ単位のため
 # service 名を分ける。推論エンジンは同梱の llama-server(fork) をコンテナ内で起動。
 service: ai-chat-bonsai
-frameworkVersion: '3'
+frameworkVersion: "3"
 useDotenv: true
 provider:
   name: aws

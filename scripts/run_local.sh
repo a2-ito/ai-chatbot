@@ -51,9 +51,9 @@ echo ""
 echo "Invoking with prompt: ${PROMPT}"
 echo "----------------------------------------"
 curl -s "http://localhost:${PORT}/2015-03-31/functions/function/invocations" \
-  -d "$(printf '{"prompt": %s, "max_tokens": 256}' "$(printf '%s' "${PROMPT}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
-  | python3 -m json.tool --no-ensure-ascii 2>/dev/null \
-  || echo "(invocation failed — check 'docker logs ${CONTAINER_NAME}')"
+  -d "$(printf '{"prompt": %s, "max_tokens": 256}' "$(printf '%s' "${PROMPT}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" |
+  python3 -m json.tool --no-ensure-ascii 2>/dev/null ||
+  echo "(invocation failed — check 'docker logs ${CONTAINER_NAME}')"
 
 echo ""
 echo "----------------------------------------"

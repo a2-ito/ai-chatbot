@@ -7,16 +7,16 @@ Slack 上で動く AI チャットボットっしゅ。
 
 ## 構成
 
-| ファイル | 役割 |
-|---|---|
-| `Dockerfile` | AWS Lambda Python ベースイメージ（RIE組込）に llama-cpp-python とモデルを同梱 |
-| `app.py` | Slack Bolt ハンドラ。スレッド履歴を messages 化して GGUF モデルで推論 |
-| `serverless.yml` | コンテナモード設定（`provider.ecr.images`／`image:`／arm64） |
-| `requirements.txt` | `slack_bolt` / `commonmark-slack` / `llama-cpp-python` |
-| `models.env` | 使用モデルの選択ファイル（使うモデルだけコメントイン） |
-| `scripts/download_model.sh` | HuggingFace から `models.env` で選んだ GGUF を取得 |
-| `scripts/build.sh` | ローカル用 `docker build`（モデル未取得なら自動DL） |
-| `scripts/run_local.sh` | RIE でローカル起動 → テスト推論 |
+| ファイル                    | 役割                                                                          |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `Dockerfile`                | AWS Lambda Python ベースイメージ（RIE組込）に llama-cpp-python とモデルを同梱 |
+| `app.py`                    | Slack Bolt ハンドラ。スレッド履歴を messages 化して GGUF モデルで推論         |
+| `serverless.yml`            | コンテナモード設定（`provider.ecr.images`／`image:`／arm64）                  |
+| `requirements.txt`          | `slack_bolt` / `commonmark-slack` / `llama-cpp-python`                        |
+| `models.env`                | 使用モデルの選択ファイル（使うモデルだけコメントイン）                        |
+| `scripts/download_model.sh` | HuggingFace から `models.env` で選んだ GGUF を取得                            |
+| `scripts/build.sh`          | ローカル用 `docker build`（モデル未取得なら自動DL）                           |
+| `scripts/run_local.sh`      | RIE でローカル起動 → テスト推論                                               |
 
 ## 前提
 
@@ -28,6 +28,7 @@ Slack 上で動く AI チャットボットっしゅ。
 ## 1. Slack App の作成
 
 - Permissions（OAuth scopes）の設定
+
 ```
 app_mentions:read
 channels:history
@@ -37,6 +38,7 @@ groups:history
 im:history
 mpim:history
 ```
+
 - ワークプレイスへのインストール
 - アイコンの設定（任意）
 
@@ -63,14 +65,14 @@ make which-model     # 取得済みモデルを確認
 
 選べるモデル（すべて Q4_K_M 量子化）:
 
-| ファミリー | サイズ | 目安DL |
-|---|---|---|
-| Llama 3.2 | 1B / 3B | 0.8 / 2.0 GB |
-| Qwen3 | 0.6B / 1.7B / 4B | 0.5 / 1.1 / 2.5 GB |
-| Gemma 3 | 1B / 4B | 0.8 / 2.5 GB |
-| Phi-4-mini | 4B | 2.5 GB |
-| GLM-Edge | 1.5B / 4B | 1.0 / 2.6 GB |
-| SmolLM2 | 135M / 360M / 1.7B | 0.1 / 0.3 / 1.1 GB |
+| ファミリー | サイズ             | 目安DL             |
+| ---------- | ------------------ | ------------------ |
+| Llama 3.2  | 1B / 3B            | 0.8 / 2.0 GB       |
+| Qwen3      | 0.6B / 1.7B / 4B   | 0.5 / 1.1 / 2.5 GB |
+| Gemma 3    | 1B / 4B            | 0.8 / 2.5 GB       |
+| Phi-4-mini | 4B                 | 2.5 GB             |
+| GLM-Edge   | 1.5B / 4B          | 1.0 / 2.6 GB       |
+| SmolLM2    | 135M / 360M / 1.7B | 0.1 / 0.3 / 1.1 GB |
 
 ## 4. ローカルで動作確認（RIE）
 
@@ -123,13 +125,16 @@ API Gateway を挟まず **Lambda Function URL** で直接公開することも�
 **Serverless Framework だけでは完結できない**ので注意っしゅ。切り替えるときの勘所：
 
 ### 切り替え方
+
 `serverless.yml` の `functions.slack` を以下に変更：
+
 ```yaml
-    # events: の代わりに
-    url: true
+# events: の代わりに
+url: true
 ```
 
 ### ⚠️ ハマりどころ（重要）
+
 - 公開 Function URL には **2つ**のリソースポリシー文が要る：
   1. `lambda:InvokeFunctionUrl`（URL到達）
   2. `lambda:InvokeFunction`（関数実行）
@@ -143,6 +148,7 @@ API Gateway を挟まず **Lambda Function URL** で直接公開することも�
   ＝動くが「任意の AWS アカウントから直接 invoke 可」と広めになるトレードオフ。
 
 ### なぜ今 API Gateway を選んでいるか
+
 - コスト差は Slack 用途では誤差（HTTP API $1 / REST API $3.5 / 100万req、Function URL $0）。
 - **API Gateway は SF だけで権限まで自動・一発で動く**（上記の権限ハマりが無い）。
 - スロットリング標準装備・WAF/カスタムドメイン対応など、公開エンドポイントとして有利。

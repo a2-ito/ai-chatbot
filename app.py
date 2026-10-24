@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import os
 import json
 import logging
+import os
 import re
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from slack_bolt import App
 import commonmarkslack
+from slack_bolt import App
+
+if TYPE_CHECKING:
+    from llama_cpp import Llama
 # llama_cpp は重いネイティブlib。ack 経路のコールド初期化を軽くするため、
 # モジュール読み込み時ではなく get_llm() 内で遅延 import する。
 
@@ -56,7 +59,7 @@ SYSTEM_PROMPT = _BASE_PROMPT + ("\n/no_think" if NO_THINK else "")
 
 
 @lru_cache(maxsize=1)
-def get_llm() -> "Llama":
+def get_llm() -> Llama:
     """モデルを一度だけロードし、コンテナの生存中はキャッシュして再利用する。"""
     from llama_cpp import Llama  # 遅延import（ここで初めてネイティブlibを読み込む）
 
@@ -65,7 +68,9 @@ def get_llm() -> "Llama":
             f"Model file not found at {MODEL_PATH}. "
             "ビルド前に scripts/download_model.sh を実行したか確認してください。"
         )
-    logger.info("LLM ロード開始 path=%s n_ctx=%d n_threads=%d", MODEL_PATH, N_CTX, N_THREADS)
+    logger.info(
+        "LLM ロード開始 path=%s n_ctx=%d n_threads=%d", MODEL_PATH, N_CTX, N_THREADS
+    )
     llm = Llama(
         model_path=MODEL_PATH,
         n_ctx=N_CTX,
@@ -97,14 +102,14 @@ def _clean(text: str) -> str:
     return _MENTION_RE.sub("", text or "").strip()
 
 
-def _count_tokens(llm: "Llama", text: str) -> int:
+def _count_tokens(llm: Llama, text: str) -> int:
     if not text:
         return 0
     return len(llm.tokenize(text.encode("utf-8"), add_bos=False, special=False))
 
 
 def _fit_messages(
-    llm: "Llama", messages: list[dict[str, str]], max_tokens: int
+    llm: Llama, messages: list[dict[str, str]], max_tokens: int
 ) -> list[dict[str, str]]:
     """N_CTX に収まるよう system を残しつつ古い発言から間引く。
 
@@ -164,21 +169,21 @@ app = App(
 parser = commonmarkslack.Parser()
 renderer = commonmarkslack.SlackRenderer()
 
+
 @lru_cache(maxsize=1)
 def get_bot_user_id():
     # auth.test は通信を伴うため、モジュール読み込み時ではなく初回利用時に遅延実行し、
     # 結果をコンテナ生存中キャッシュする（ack 経路のコールド初期化を軽くするため）。
     try:
         logger.debug("auth_test 実行中")
-        result = app.client.auth_test(
-            token=os.environ["SLACK_BOT_TOKEN"]
-        )
+        result = app.client.auth_test(token=os.environ["SLACK_BOT_TOKEN"])
         user_id = result["user_id"]
         logger.info("Bot user_id 取得成功: %s", user_id)
         return user_id
-    except Exception as e:
-        logger.exception("auth_test 失敗（botUserId は None になります）: %s", e)
+    except Exception:
+        logger.exception("auth_test 失敗（botUserId は None になります）")
         return None
+
 
 def respond_to_slack_within_3_seconds(body, ack):
     logger.debug("respond_to_slack_within_3_seconds 呼び出し body=%s", body)
@@ -190,8 +195,11 @@ def respond_to_slack_within_3_seconds(body, ack):
         logger.debug("ack 送信: task=%s", body["text"])
         ack(f"Accepted! (task: {body['text']})")
 
+
 def fetch_thread_messages(channel, thread_ts):
-    logger.debug("スレッドメッセージ取得開始 channel=%s thread_ts=%s", channel, thread_ts)
+    logger.debug(
+        "スレッドメッセージ取得開始 channel=%s thread_ts=%s", channel, thread_ts
+    )
     try:
         thread_messages_response = app.client.conversations_replies(
             channel=channel,
@@ -200,9 +208,14 @@ def fetch_thread_messages(channel, thread_ts):
         messages = thread_messages_response["messages"]
         logger.debug("スレッドメッセージ取得完了: %d 件", len(messages))
         return messages
-    except Exception as e:
-        logger.exception("conversations_replies 失敗 channel=%s thread_ts=%s: %s", channel, thread_ts, e)
+    except Exception:
+        logger.exception(
+            "conversations_replies 失敗 channel=%s thread_ts=%s",
+            channel,
+            thread_ts,
+        )
         raise
+
 
 def run_long_process(body, say):
     logger.info("run_long_process 開始")
@@ -210,7 +223,11 @@ def run_long_process(body, say):
         mention = body["event"]
         text = mention["text"]
         channel = mention["channel"]
-        logger.debug("メンション受信 channel=%s text=%s", channel, text[:50] + "..." if len(text) > 50 else text)
+        logger.debug(
+            "メンション受信 channel=%s text=%s",
+            channel,
+            text[:50] + "..." if len(text) > 50 else text,
+        )
 
         threadMessages = []
         if "thread_ts" in mention:
@@ -234,10 +251,12 @@ def run_long_process(body, say):
                 is_bot = message.get("user") == bot_id or "bot_id" in message
                 content = _clean(message.get("text", ""))
                 if content:
-                    threadContent.append({
-                        "role": "assistant" if is_bot else "user",
-                        "content": content,
-                    })
+                    threadContent.append(
+                        {
+                            "role": "assistant" if is_bot else "user",
+                            "content": content,
+                        }
+                    )
         else:
             # 新規スレッド（履歴なし）: 現在のメンション本文のみを user として渡す。
             threadContent.append({"role": "user", "content": _clean(text)})
@@ -249,18 +268,18 @@ def run_long_process(body, say):
         slack_md = renderer.render(parser.parse(resText))
         say(text=slack_md, channel=channel, thread_ts=thread_ts)
         logger.info("run_long_process 完了 Slack に応答送信")
-    except Exception as e:
-        logger.exception("run_long_process 失敗: %s", e)
+    except Exception:
+        logger.exception("run_long_process 失敗")
         raise
 
-app.event("app_mention")(
-    ack=respond_to_slack_within_3_seconds,
-    lazy=[run_long_process]
-)
+
+app.event("app_mention")(ack=respond_to_slack_within_3_seconds, lazy=[run_long_process])
+
 
 @app.event("message")
 def handle_message_events(body, logger):
     logger.info(body)
+
 
 if __name__ == "__main__":
     app.start()
@@ -338,7 +357,10 @@ def _direct_llm_handler(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def handler(event, context):
-    logger.debug("Lambda handler 呼び出し event_keys=%s", list(event.keys()) if isinstance(event, dict) else type(event))
+    logger.debug(
+        "Lambda handler 呼び出し event_keys=%s",
+        list(event.keys()) if isinstance(event, dict) else type(event),
+    )
     # ローカル検証・手動 invoke 用の直接推論パス
     if _is_direct_llm_request(event):
         logger.debug("直接 LLM リクエストとして処理")
@@ -346,8 +368,11 @@ def handler(event, context):
     try:
         slack_handler = SlackRequestHandler(app=app)
         result = slack_handler.handle(event, context)
-        logger.debug("Lambda handler 完了 status=%s", result.get("statusCode") if isinstance(result, dict) else "N/A")
+        logger.debug(
+            "Lambda handler 完了 status=%s",
+            result.get("statusCode") if isinstance(result, dict) else "N/A",
+        )
         return result
-    except Exception as e:
-        logger.exception("Lambda handler 失敗: %s", e)
+    except Exception:
+        logger.exception("Lambda handler 失敗")
         raise

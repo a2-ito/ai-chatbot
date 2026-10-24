@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import os
-import json
-import time
 import atexit
+import json
 import logging
+import os
 import subprocess
+import time
 from functools import lru_cache
 from typing import Any
 
+import commonmarkslack
 import requests
 from slack_bolt import App
-import commonmarkslack
 
 # log 設定: LOG_LEVEL 環境変数で制御（DEBUG, INFO, WARNING, ERROR）。
 # Lambda ではランタイムが起動時にルートロガーへハンドラを付けているため
@@ -74,14 +74,21 @@ def ensure_server() -> str:
 
     cmd = [
         LLAMA_SERVER_BIN,
-        "-m", MODEL_PATH,
-        "-c", str(N_CTX),
-        "-t", str(N_THREADS),
-        "--host", LLAMA_HOST,
-        "--port", str(LLAMA_PORT),
+        "-m",
+        MODEL_PATH,
+        "-c",
+        str(N_CTX),
+        "-t",
+        str(N_THREADS),
+        "--host",
+        LLAMA_HOST,
+        "--port",
+        str(LLAMA_PORT),
         # CPU 実行（GPU レイヤ 0）。fork README 推奨の flash-attention を有効化。
-        "-ngl", "0",
-        "-fa", "1",
+        "-ngl",
+        "0",
+        "-fa",
+        "1",
     ]
     logger.info("llama-server 起動: %s", " ".join(cmd))
     # 書き込み可能な /tmp を作業ディレクトリにする（Lambda は /tmp のみ書込可）。
@@ -158,8 +165,8 @@ def get_bot_user_id():
         user_id = result["user_id"]
         logger.info("Bot user_id 取得成功: %s", user_id)
         return user_id
-    except Exception as e:
-        logger.exception("auth_test 失敗（botUserId は None になります）: %s", e)
+    except Exception:
+        logger.exception("auth_test 失敗（botUserId は None になります）")
         return None
 
 
@@ -175,7 +182,9 @@ def respond_to_slack_within_3_seconds(body, ack):
 
 
 def fetch_thread_messages(channel, thread_ts):
-    logger.debug("スレッドメッセージ取得開始 channel=%s thread_ts=%s", channel, thread_ts)
+    logger.debug(
+        "スレッドメッセージ取得開始 channel=%s thread_ts=%s", channel, thread_ts
+    )
     try:
         thread_messages_response = app.client.conversations_replies(
             channel=channel,
@@ -184,8 +193,12 @@ def fetch_thread_messages(channel, thread_ts):
         messages = thread_messages_response["messages"]
         logger.debug("スレッドメッセージ取得完了: %d 件", len(messages))
         return messages
-    except Exception as e:
-        logger.exception("conversations_replies 失敗 channel=%s thread_ts=%s: %s", channel, thread_ts, e)
+    except Exception:
+        logger.exception(
+            "conversations_replies 失敗 channel=%s thread_ts=%s",
+            channel,
+            thread_ts,
+        )
         raise
 
 
@@ -195,7 +208,11 @@ def run_long_process(body, say):
         mention = body["event"]
         text = mention["text"]
         channel = mention["channel"]
-        logger.debug("メンション受信 channel=%s text=%s", channel, text[:50] + "..." if len(text) > 50 else text)
+        logger.debug(
+            "メンション受信 channel=%s text=%s",
+            channel,
+            text[:50] + "..." if len(text) > 50 else text,
+        )
 
         threadMessages = []
         if "thread_ts" in mention:
@@ -223,8 +240,8 @@ def run_long_process(body, say):
         slack_md = renderer.render(parser.parse(resText))
         say(text=slack_md, channel=channel, thread_ts=thread_ts)
         logger.info("run_long_process 完了 Slack に応答送信")
-    except Exception as e:
-        logger.exception("run_long_process 失敗: %s", e)
+    except Exception:
+        logger.exception("run_long_process 失敗")
         raise
 
 
@@ -307,7 +324,10 @@ def _direct_llm_handler(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def handler(event, context):
-    logger.debug("Lambda handler 呼び出し event_keys=%s", list(event.keys()) if isinstance(event, dict) else type(event))
+    logger.debug(
+        "Lambda handler 呼び出し event_keys=%s",
+        list(event.keys()) if isinstance(event, dict) else type(event),
+    )
     # ローカル検証・手動 invoke 用の直接推論パス
     if _is_direct_llm_request(event):
         logger.debug("直接 LLM リクエストとして処理")
@@ -315,8 +335,11 @@ def handler(event, context):
     try:
         slack_handler = SlackRequestHandler(app=app)
         result = slack_handler.handle(event, context)
-        logger.debug("Lambda handler 完了 status=%s", result.get("statusCode") if isinstance(result, dict) else "N/A")
+        logger.debug(
+            "Lambda handler 完了 status=%s",
+            result.get("statusCode") if isinstance(result, dict) else "N/A",
+        )
         return result
-    except Exception as e:
-        logger.exception("Lambda handler 失敗: %s", e)
+    except Exception:
+        logger.exception("Lambda handler 失敗")
         raise

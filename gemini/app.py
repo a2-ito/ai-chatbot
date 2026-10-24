@@ -1,8 +1,9 @@
-import os
 import logging
-from slack_bolt import App
-import google.generativeai as genai
+import os
+
 import commonmarkslack
+import google.generativeai as genai
+from slack_bolt import App
 
 # ログ設定: LOG_LEVEL 環境変数で制御（DEBUG, INFO, WARNING, ERROR）
 log_level = (os.getenv("LOG_LEVEL") or "INFO").upper()
@@ -20,28 +21,29 @@ app = App(
 )
 
 # openai.api_key = os.environ["OPENAI_API_KEY"]
-GOOGLE_API_KEY=os.getenv('GOOGLE_API_KEY')
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 gemini_pro = genai.GenerativeModel("gemini-pro")
 
 parser = commonmarkslack.Parser()
 renderer = commonmarkslack.SlackRenderer()
 
+
 def get_bot_user_id():
     try:
         logger.debug("auth_test 実行中")
-        result = app.client.auth_test(
-            token=os.environ["SLACK_BOT_TOKEN"]
-        )
+        result = app.client.auth_test(token=os.environ["SLACK_BOT_TOKEN"])
         user_id = result["user_id"]
         logger.info("Bot user_id 取得成功: %s", user_id)
         return user_id
-    except Exception as e:
-        logger.exception("auth_test 失敗（botUserId は None になります）: %s", e)
+    except Exception:
+        logger.exception("auth_test 失敗（botUserId は None になります）")
         return None
+
 
 botUserId = get_bot_user_id()
 logger.debug("botUserId: %s", botUserId)
+
 
 def respond_to_slack_within_3_seconds(body, ack):
     logger.debug("respond_to_slack_within_3_seconds 呼び出し body=%s", body)
@@ -53,8 +55,11 @@ def respond_to_slack_within_3_seconds(body, ack):
         logger.debug("ack 送信: task=%s", body["text"])
         ack(f"Accepted! (task: {body['text']})")
 
+
 def fetch_thread_messages(channel, thread_ts):
-    logger.debug("スレッドメッセージ取得開始 channel=%s thread_ts=%s", channel, thread_ts)
+    logger.debug(
+        "スレッドメッセージ取得開始 channel=%s thread_ts=%s", channel, thread_ts
+    )
     try:
         thread_messages_response = app.client.conversations_replies(
             channel=channel,
@@ -63,18 +68,26 @@ def fetch_thread_messages(channel, thread_ts):
         messages = thread_messages_response["messages"]
         logger.debug("スレッドメッセージ取得完了: %d 件", len(messages))
         return messages
-    except Exception as e:
-        logger.exception("conversations_replies 失敗 channel=%s thread_ts=%s: %s", channel, thread_ts, e)
+    except Exception:
+        logger.exception(
+            "conversations_replies 失敗 channel=%s thread_ts=%s",
+            channel,
+            thread_ts,
+        )
         raise
 
-import time
+
 def run_long_process(body, say):
     logger.info("run_long_process 開始")
     try:
         mention = body["event"]
         text = mention["text"]
         channel = mention["channel"]
-        logger.debug("メンション受信 channel=%s text=%s", channel, text[:50] + "..." if len(text) > 50 else text)
+        logger.debug(
+            "メンション受信 channel=%s text=%s",
+            channel,
+            text[:50] + "..." if len(text) > 50 else text,
+        )
 
         threadMessages = []
         if "thread_ts" in mention:
@@ -98,16 +111,15 @@ def run_long_process(body, say):
         slack_md = renderer.render(parser.parse(resText))
         say(text=slack_md, channel=channel, thread_ts=thread_ts)
         logger.info("run_long_process 完了 Slack に応答送信")
-    except Exception as e:
-        logger.exception("run_long_process 失敗: %s", e)
+    except Exception:
+        logger.exception("run_long_process 失敗")
         raise
 
-app.event("app_mention")(
-    ack=respond_to_slack_within_3_seconds,
-    lazy=[run_long_process]
-)
 
-#@app.event("app_mention")
+app.event("app_mention")(ack=respond_to_slack_within_3_seconds, lazy=[run_long_process])
+
+
+# @app.event("app_mention")
 def mention_handler(body, say):
     mention = body["event"]
     text = mention["text"]
@@ -119,9 +131,11 @@ def mention_handler(body, say):
     # スレッドでテキストをオウム返し
     say(text=text, channel=channel, thread_ts=thread_ts)
 
+
 @app.event("message")
 def handle_message_events(body, logger):
     logger.info(body)
+
 
 if __name__ == "__main__":
     app.start()
@@ -129,13 +143,20 @@ if __name__ == "__main__":
 # AWS Lambda
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 
+
 def handler(event, context):
-    logger.debug("Lambda handler 呼び出し event_keys=%s", list(event.keys()) if isinstance(event, dict) else type(event))
+    logger.debug(
+        "Lambda handler 呼び出し event_keys=%s",
+        list(event.keys()) if isinstance(event, dict) else type(event),
+    )
     try:
         slack_handler = SlackRequestHandler(app=app)
         result = slack_handler.handle(event, context)
-        logger.debug("Lambda handler 完了 status=%s", result.get("statusCode") if isinstance(result, dict) else "N/A")
+        logger.debug(
+            "Lambda handler 完了 status=%s",
+            result.get("statusCode") if isinstance(result, dict) else "N/A",
+        )
         return result
-    except Exception as e:
-        logger.exception("Lambda handler 失敗: %s", e)
+    except Exception:
+        logger.exception("Lambda handler 失敗")
         raise

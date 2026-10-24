@@ -12,6 +12,8 @@
 
 # --- builder: fork llama.cpp を CPU 向けにソースビルド -----------------------
 FROM public.ecr.aws/lambda/python:3.12 AS builder
+# パイプの途中（ldd | tee など）の失敗でも RUN を落とす
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # ビルドツール一式（最終イメージには持ち込まない）。
 RUN dnf install -y gcc gcc-c++ make cmake git && dnf clean all
